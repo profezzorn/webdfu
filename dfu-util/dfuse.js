@@ -95,6 +95,7 @@ var dfuse = {};
         }
 
         let status = await this.poll_until(state => (state != dfu.dfuDNBUSY));
+	
         if (status.status != dfu.STATUS_OK) {
             throw "Special DfuSe command " + commandName + " failed";
         }
@@ -192,6 +193,7 @@ var dfuse = {};
             this.logProgress(bytesErased, bytesToErase);
         }
 
+        this.logDebug(`BEGIN ERASING`);
         while (addr < endAddr) {
             if (segment.end <= addr) {
                 segment = this.getSegment(addr);
@@ -206,11 +208,22 @@ var dfuse = {};
             const sectorIndex = Math.floor((addr - segment.start)/segment.sectorSize);
             const sectorAddr = segment.start + sectorIndex * segment.sectorSize;
             this.logDebug(`Erasing ${segment.sectorSize}B at 0x${sectorAddr.toString(16)}`);
-            await this.dfuseCommand(dfuse.ERASE_SECTOR, sectorAddr, 4);
+	    for (let i = 0; i < 20; i++) {
+		if (i == 19) {
+		    await this.dfuseCommand(dfuse.ERASE_SECTOR, sectorAddr, 4);
+		} else {
+		    try {
+			await this.dfuseCommand(dfuse.ERASE_SECTOR, sectorAddr, 4);
+			i = 20;
+		    } catch (error) {
+		    }
+		}
+            }
             addr = sectorAddr + segment.sectorSize;
             bytesErased += segment.sectorSize;
             this.logProgress(bytesErased, bytesToErase);
         }
+        this.logDebug(`DONE ERASING`);
     };
 
     dfuse.Device.prototype.do_download = async function(xfer_size, data, manifestationTolerant) {

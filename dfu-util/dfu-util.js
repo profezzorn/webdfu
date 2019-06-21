@@ -433,41 +433,6 @@ var device = null;
             return device;
         }
 
-        function autoConnect(vid, serial) {
-            dfu.findAllDfuInterfaces().then(
-                async dfu_devices => {
-                    let matching_devices = [];
-                    for (let dfu_device of dfu_devices) {
-                        if (serial) {
-                            if (dfu_device.device_.serialNumber == serial) {
-                                matching_devices.push(dfu_device);
-                            }
-                        } else if (dfu_device.device_.vendorId == vid) {
-                            matching_devices.push(dfu_device);
-                        }
-                    }
-
-                    if (matching_devices.length == 0) {
-                        statusDisplay.textContent = 'No device found.';
-                    } else {
-                        if (matching_devices.length == 1) {
-                            statusDisplay.textContent = 'Connecting...';
-                            device = matching_devices[0];
-                            console.log(device);
-                            device = await connect(device);
-                        } else {
-                            statusDisplay.textContent = "Multiple DFU interfaces found.";
-                        }
-                        vidField.value = "0x" + hex4(matching_devices[0].device_.vendorId).toUpperCase();
-                        vid = matching_devices[0].device_.vendorId;
-                    }
-                }
-            );
-        }
-
-        vidField.addEventListener("change", function() {
-            vid = parseInt(vidField.value, 16);
-        });
 
         transferSizeField.addEventListener("change", function() {
             transferSize = parseInt(transferSizeField.value);
@@ -497,37 +462,17 @@ var device = null;
                 device = null;
             } else {
                 let filters = [];
-                if (serial) {
-                    filters.push({ 'serialNumber': serial });
-                } else if (vid) {
-                    filters.push({ 'vendorId': vid });
-                }
+                filters.push({ 'vendorId': 0x483 });
                 navigator.usb.requestDevice({ 'filters': filters }).then(
                     async selectedDevice => {
                         let interfaces = dfu.findDeviceDfuInterfaces(selectedDevice);
                         if (interfaces.length == 0) {
                             console.log(selectedDevice);
                             statusDisplay.textContent = "The selected device does not have any USB DFU interfaces.";
-                        } else if (interfaces.length == 1) {
+                        } else {
+			    // STM32L433 has 4 interfaces, select the first one.
                             await fixInterfaceNames(selectedDevice, interfaces);
                             device = await connect(new dfu.Device(selectedDevice, interfaces[0]));
-                        } else {
-                            await fixInterfaceNames(selectedDevice, interfaces);
-                            populateInterfaceList(interfaceForm, selectedDevice, interfaces);
-                            async function connectToSelectedInterface() {
-                                interfaceForm.removeEventListener('submit', this);
-                                const index = interfaceForm.elements["interfaceIndex"].value;
-                                device = await connect(new dfu.Device(selectedDevice, interfaces[index]));
-                            }
-
-                            interfaceForm.addEventListener('submit', connectToSelectedInterface);
-
-                            interfaceDialog.addEventListener('cancel', function () {
-                                interfaceDialog.removeEventListener('cancel', this);
-                                interfaceForm.removeEventListener('submit', connectToSelectedInterface);
-                            });
-
-                            interfaceDialog.showModal();
                         }
                     }
                 ).catch(error => {
@@ -667,10 +612,6 @@ var device = null;
         // Check if WebUSB is available
         if (typeof navigator.usb !== 'undefined') {
             navigator.usb.addEventListener("disconnect", onUnexpectedDisconnect);
-            // Try connecting automatically
-            if (fromLandingPage) {
-                autoConnect(vid, serial);
-            }
         } else {
             statusDisplay.textContent = 'WebUSB not available.'
             connectButton.disabled = true;
