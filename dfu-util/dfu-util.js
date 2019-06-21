@@ -173,6 +173,7 @@ var device = null;
     }
 
     function logInfo(msg) {
+        console.log(msg);
         if (logContext) {
             let info = document.createElement("p");
             info.className = "info";
@@ -182,6 +183,7 @@ var device = null;
     }
 
     function logWarning(msg) {
+        console.log(msg);
         if (logContext) {
             let warning = document.createElement("p");
             warning.className = "warning";
@@ -191,6 +193,7 @@ var device = null;
     }
 
     function logError(msg) {
+        console.log(msg);
         if (logContext) {
             let error = document.createElement("p");
             error.className = "error";
