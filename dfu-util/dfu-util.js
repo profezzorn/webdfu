@@ -89,34 +89,6 @@ var device = null;
         }
     }
 
-    function populateInterfaceList(form, device_, interfaces) {
-        let old_choices = Array.from(form.getElementsByTagName("div"));
-        for (let radio_div of old_choices) {
-            form.removeChild(radio_div);
-        }
-
-        let button = form.getElementsByTagName("button")[0];
-
-        for (let i=0; i < interfaces.length; i++) {
-            let radio = document.createElement("input");
-            radio.type = "radio";
-            radio.name = "interfaceIndex";
-            radio.value = i;
-            radio.id = "interface" + i;
-            radio.required = true;
-
-            let label = document.createElement("label");
-            label.textContent = formatDFUInterfaceAlternate(interfaces[i]);
-            label.className = "radio"
-            label.setAttribute("for", "interface" + i);
-
-            let div = document.createElement("div");
-            div.appendChild(radio);
-            div.appendChild(label);
-            form.insertBefore(div, button);
-        }
-    }
-
     function getDFUDescriptorProperties(device) {
         // Attempt to read the DFU functional descriptor
         // TODO: read the selected configuration's descriptor
@@ -530,16 +502,11 @@ var device = null;
             event.preventDefault();
             event.stopPropagation();
             if (!configForm.checkValidity()) {
-		console.log("FLORB");
                 configForm.reportValidity();
                 return false;
             }
             
-	    console.log("FNORG");
-	    console.log(device);
-	    console.log(firmwareFile);
             if (device && firmwareFile != null) {
-		console.log("GO");
                 setLogContext(downloadLog);
                 clearLog(downloadLog);
                 try {
