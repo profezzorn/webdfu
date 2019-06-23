@@ -234,21 +234,6 @@ var device = null;
         let searchParams = new URLSearchParams(window.location.search);
         let fromLandingPage = false;
         let vid = 0;
-        // Set the vendor ID from the landing page URL
-        if (searchParams.has("vid")) {
-            const vidString = searchParams.get("vid");
-            try {
-                if (vidString.toLowerCase().startsWith("0x")) {
-                    vid = parseInt(vidString, 16);
-                } else {
-                    vid = parseInt(vidString, 10);
-                }
-                vidField.value = "0x" + hex4(vid).toUpperCase();
-                fromLandingPage = true;
-            } catch (error) {
-                console.log("Bad VID " + vidString + ":" + error);
-            }
-        }
 
         // Grab the serial number from the landing page
         let serial = "";
@@ -263,11 +248,8 @@ var device = null;
 
         let configForm = document.querySelector("#configForm");
 
-        let transferSizeField = document.querySelector("#transferSize");
-        let transferSize = parseInt(transferSizeField.value);
-
-        let dfuseStartAddressField = document.querySelector("#dfuseStartAddress");
-        let dfuseUploadSizeField = document.querySelector("#dfuseUploadSize");
+        let transferSize = 1024;
+	let maxSize = -1;
 
         let firmwareFileField = document.querySelector("#firmwareFile");
         let firmwareFile = null;
@@ -324,7 +306,6 @@ var device = null;
                 device.properties = desc;
                 let info = `WillDetach=${desc.WillDetach}, ManifestationTolerant=${desc.ManifestationTolerant}, CanUpload=${desc.CanUpload}, CanDnload=${desc.CanDnload}, TransferSize=${desc.TransferSize}, DetachTimeOut=${desc.DetachTimeOut}, Version=${hex4(desc.DFUVersion)}`;
                 dfuDisplay.textContent += "\n" + info;
-                transferSizeField.value = desc.TransferSize;
                 transferSize = desc.TransferSize;
                 if (desc.CanDnload) {
                     manifestationTolerant = desc.ManifestationTolerant;
@@ -333,7 +314,6 @@ var device = null;
                 if (device.settings.alternate.interfaceProtocol == 0x02) {
                     if (!desc.CanUpload) {
                         uploadButton.disabled = true;
-                        dfuseUploadSizeField.disabled = true;
                     }
                     if (!desc.CanDnload) {
                         dnloadButton.disabled = true;
@@ -409,48 +389,20 @@ var device = null;
             if (device.memoryInfo) {
                 let dfuseFieldsDiv = document.querySelector("#dfuseFields")
                 dfuseFieldsDiv.hidden = false;
-                dfuseStartAddressField.disabled = false;
-                dfuseUploadSizeField.disabled = false;
                 let segment = device.getFirstWritableSegment();
                 if (segment) {
                     device.startAddress = segment.start;
-                    dfuseStartAddressField.value = "0x" + segment.start.toString(16);
-                    const maxReadSize = device.getMaxReadSize(segment.start);
-                    dfuseUploadSizeField.value = maxReadSize;
-                    dfuseUploadSizeField.max = maxReadSize;
+		    maxSize = device.getMaxReadSize(segment.start);
                 }
             } else {
                 let dfuseFieldsDiv = document.querySelector("#dfuseFields")
                 dfuseFieldsDiv.hidden = true;
-                dfuseStartAddressField.disabled = true;
-                dfuseUploadSizeField.disabled = true;
             }
 
             return device;
         }
 
 
-        transferSizeField.addEventListener("change", function() {
-            transferSize = parseInt(transferSizeField.value);
-        });
-
-        dfuseStartAddressField.addEventListener("change", function(event) {
-            const field = event.target;
-            let address = parseInt(field.value, 16);
-            if (isNaN(address)) {
-                field.setCustomValidity("Invalid hexadecimal start address");
-            } else if (device && device.memoryInfo) {
-                if (device.getSegment(address) !== null) {
-                    device.startAddress = address;
-                    field.setCustomValidity("");
-                    dfuseUploadSizeField.max = device.getMaxReadSize(address);
-                } else {
-                    field.setCustomValidity("Address outside of memory map");
-                }
-            } else {
-                field.setCustomValidity("");
-            }
-        });
 
         connectButton.addEventListener('click', function() {
             if (device) {
@@ -458,21 +410,68 @@ var device = null;
                 device = null;
             } else {
                 let filters = [];
-                filters.push({ 'vendorId': 0x483 });
+                filters.push({ 'vendorId': 0x483, 'productId':0xdf11 });
+                filters.push({ 'vendorId': 0x1209, 'productId':0x6668 });
                 navigator.usb.requestDevice({ 'filters': filters }).then(
                     async selectedDevice => {
-                        let interfaces = dfu.findDeviceDfuInterfaces(selectedDevice);
-                        if (interfaces.length == 0) {
-                            console.log(selectedDevice);
-                            statusDisplay.textContent = "The selected device does not have any USB DFU interfaces.";
-                        } else {
-			    // STM32L433 has 4 interfaces, select the first one.
-                            await fixInterfaceNames(selectedDevice, interfaces);
-                            device = await connect(new dfu.Device(selectedDevice, interfaces[0]));
-                        }
+			if (selectedDevice.vendorId == 0x1209) {
+
+			    await selectedDevice.open();
+			    if (selectedDevice.configuration === null) {
+				selectedDevice.selectConfiguration(1);
+			    }
+			    var interfaceNumber = -1;
+			    var endpointOut;
+			    var endpointIn;
+			    selectedDevice.configuration.interfaces.forEach(element => {
+				element.alternates.forEach(elementalt => {
+				    console.log(elementalt);
+				    if (elementalt.interfaceClass == 0xff) {
+					elementalt.endpoints.forEach(elementendpoint => {
+					    interfaceNumber = element.interfaceNumber;
+					    if (elementendpoint.direction == "out") {
+						endpointOut = elementendpoint.endpointNumber;
+					    }
+					    if (elementendpoint.direction == "in") {
+						endpointIn = elementendpoint.endpointNumber;
+					    }
+					})
+				    }
+				})
+			    })
+
+			    if (interfaceNumber == -1) {
+				statusDisplay.textContent = "No WebUSB interface, unable to reset device, please press BOOT+RESET.";
+			    } else {
+				await selectedDevice.claimInterface(interfaceNumber);
+				await selectedDevice.selectAlternateInterface(interfaceNumber, 0);
+				await selectedDevice.controlTransferOut({
+				    'requestType': 'class',
+				    'recipient': 'interface',
+				    'request': 0x22,
+				    'value': 0x01,
+				    'index': interfaceNumber});
+				selectedDevice.transferOut(endpointOut,
+							   new TextEncoder('utf-8').encode("\nRebootDFU\n"));  
+				
+				statusDisplay.textContent = "Proffieboard is rebooting into bootloader mode, please click 'Connect' again. (If this doesn't work, please press BOOT+RESET)";
+
+			    }
+			} else {
+                            let interfaces = dfu.findDeviceDfuInterfaces(selectedDevice);
+                            if (interfaces.length == 0) {
+				console.log(selectedDevice);
+				statusDisplay.textContent = "The selected device does not have any USB DFU interfaces.";
+                            } else {
+				// STM32L433 has 4 interfaces, select the first one.
+				await fixInterfaceNames(selectedDevice, interfaces);
+				device = await connect(new dfu.Device(selectedDevice, interfaces[0]));
+                            }
+			}
                     }
                 ).catch(error => {
                     statusDisplay.textContent = error;
+		    console.log(error);
                 });
             }
         });
@@ -500,11 +499,6 @@ var device = null;
                     device.logWarning("Failed to clear status");
                 }
 
-                let maxSize = Infinity;
-                if (!dfuseUploadSizeField.disabled) {
-                    maxSize = parseInt(dfuseUploadSizeField.value);
-                }
-
                 try {
                     const blob = await device.do_upload(transferSize, maxSize);
                     saveAs(blob, "firmware.bin");
@@ -518,7 +512,8 @@ var device = null;
             return false;
         });
 
-        firmwareFileField.addEventListener("change", function() {
+
+	firmwareFileField.addEventListener("change", function() {
             firmwareFile = null;
             if (firmwareFileField.files.length > 0) {
                 let file = firmwareFileField.files[0];
@@ -528,17 +523,23 @@ var device = null;
                 };
                 reader.readAsArrayBuffer(file);
             }
-        });
+        });	
+
 
         downloadButton.addEventListener('click', async function(event) {
             event.preventDefault();
             event.stopPropagation();
             if (!configForm.checkValidity()) {
+		console.log("FLORB");
                 configForm.reportValidity();
                 return false;
             }
             
+	    console.log("FNORG");
+	    console.log(device);
+	    console.log(firmwareFile);
             if (device && firmwareFile != null) {
+		console.log("GO");
                 setLogContext(downloadLog);
                 clearLog(downloadLog);
                 try {
